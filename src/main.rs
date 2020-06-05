@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::cmp;
 use tcod::colors::*;
 use tcod::console::*;
@@ -10,10 +11,14 @@ const SCREEN_HEIGHT: i32 = 50;
 const MAP_WIDTH: i32 = 80;
 const MAP_HEIGHT: i32 = 45;
 
-const LIMIT_FPS: i32 = 60;
+const LIMIT_FPS: i32 = 20;
 
 const COLOR_DARK_WALL: Color = Color {r: 0, g: 0, b: 100};
 const COLOR_DARK_GROUND : Color = Color {r: 50, g: 50, b: 150};
+
+const ROOM_MAX_SIZE: i32 = 10;
+const ROOM_MIN_SIZE: i32 = 6;
+const MAX_ROOMS: i32 = 30;
 
 #[derive(Clone, Copy, Debug)]
 struct Tile {
@@ -54,6 +59,16 @@ impl Rect {
             y2: y+h,
         }
     }
+
+    pub fn center(&self) -> (i32, i32){
+        let center_x = (self.x1 + self.x2) / 2;
+        let center_y = (self.y1 + self.y2) / 2;
+        (center_x, center_y)
+    }
+
+    pub fn intersects_with(&self, other: &Rect) -> bool {
+        (self.x1 <= other.x2) && (self.y1 <= other.y2) && (self.x2 >= other.x1) && (self.y2 >= other.y1)
+    }
 }
 
 fn create_room(room: Rect, map: &mut Map){
@@ -82,15 +97,49 @@ struct Game {
     map: Map,
 }
 
-fn make_map() -> Map {
+fn make_map(player: &mut Object) -> Map {
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
     
+    let mut rooms = vec![];
+    for _ in 0..MAX_ROOMS{
+        let w = rand::thread_rng().gen_range(ROOM_MIN_SIZE, ROOM_MAX_SIZE + 1);
+        let h = rand::thread_rng().gen_range(ROOM_MIN_SIZE, ROOM_MAX_SIZE + 1);
 
-    let room1 = Rect::new(20,15,10,15);
-    let room2 = Rect::new(50,15,10,15);
-    create_h_tunnel(25,55,23, &mut map);
-    create_room(room1, &mut map);
-    create_room(room2, &mut map);
+        let x = rand::thread_rng().gen_range(0, MAP_WIDTH - w);
+        let y = rand::thread_rng().gen_range(0, MAP_WIDTH - h);
+        
+        let new_room = Rect::new(x,y,w,h);
+
+        let failed = rooms
+            .iter()
+            .any(|other_room|
+new_room.intersects_with(other_room));
+
+        if !failed {
+            
+            create_room(new_room, &mut map);
+
+            let (new_x, new_y) = new_room.center();
+
+            if rooms.is_empty() {
+                player.x = new_x;
+                player.y = new_y;
+            } else {
+                let (prev_x, prev_y) = rooms[rooms.len() - 1].center();
+
+                if rand::random() {
+                    create_h_tunnel(prev_x, new_x, prev_y, &mut map);
+                    create_v_tunnel(prev_y,new_y,prev_x, &mut map);
+                } else {
+                    create_v_tunnel(prev_y, new_y, prev_x, &mut map);
+                    create_h_tunnel(prev_x,new_x,new_y, &mut map);
+                }
+            }
+
+            rooms.push(new_room);
+        }
+        
+    }
 
     map
 }   
@@ -130,14 +179,14 @@ fn main() {
         .size(SCREEN_WIDTH, SCREEN_HEIGHT)
         .title("RUST GAME")
         .init();
-    let player = Object::new(25, 23, '@', WHITE);
+    let player = Object::new(0, 0, '@', WHITE);
     let npc = Object::new(SCREEN_WIDTH / 2 - 7, SCREEN_HEIGHT / 2, '%', YELLOW);
     let mut objects = [player, npc];
     let con = Offscreen::new(MAP_WIDTH, MAP_HEIGHT);
     let mut tcod = Tcod { root, con };
 
     let game = Game {
-        map: make_map(),
+        map: make_map(&mut objects[0]),
     };
 
     tcod::system::set_fps(LIMIT_FPS);
